@@ -443,7 +443,7 @@ local function applyFx(i, o)
     end
     if gate then
         local sk, base = T.shut.key, fx[i].v[T.shut.key]
-        if shut then o[sk] = T.shut.closed
+        if shut then o[sk] = T.shut.closed; o.dim = 0
         elseif base <= T.shut.closed + .01 then o[sk] = T.shut.open end
     end
 end
