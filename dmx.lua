@@ -129,6 +129,16 @@ local LAYERS = {
         windmill = { "ei", "eo", "r", "g", "b" } } },
 }
 
+-- Posisi = pan/tilt + beam + dimmer semua fixture
+for _, src in ipairs({ "dim", "beam" }) do
+    for t, ks in pairs(LAYERS[src].keys) do
+        local dst = LAYERS.pos.keys[t]
+        if not dst then dst = {}; LAYERS.pos.keys[t] = dst end
+        for _, k in ipairs(ks) do table.insert(dst, k) end
+    end
+end
+local POS_VMAX = .45 -- batas kecepatan gerak beam, makin kecil makin halus
+
 local CONT = { dim = true, pan = true, tilt = true, int = true, focus = true, frost = true,
     adim = true, rdim = true, bdim = true, r = true, g = true, b = true, w = true, fog = true, mpos = true,
     d1 = true, d2 = true, d3 = true, d4 = true, r1 = true, g1 = true, b1 = true, r2 = true, g2 = true, b2 = true,
@@ -170,10 +180,12 @@ local active = { pos = false, mov = false, dim = false, beam = false }
 local cur = 1
 local UI = {}
 local flash = { blind = {}, fog = {} }
+-- BLINDER: semua fixture jadi putih terang
 local FLASH_B = {
     blinder = { d1 = 1, d2 = 1, d3 = 1, d4 = 1 },
-    clara = { dim = 0 },
-    mapple = { rdim = 1, rstrobe = 0, rc1 = 240 / 255, rc2 = 240 / 255, rc3 = 240 / 255, rmac = 0, bdim = 0 },
+    strobe = { int = 1 },
+    clara = { dim = 1, strobe = 208 / 255, color = 1 / 255, frost = 0, gobo = 0, gobor = 0, prism = 0, prism2 = 0, prot = 0 },
+    mapple = { rdim = 1, rstrobe = 0, rc1 = 240 / 255, rc2 = 240 / 255, rc3 = 240 / 255, rmac = 0, bdim = 1, bcol = 230 / 255, bmac = 0 },
     parled = { dim = 1, r = 1, g = 1, b = 1, w = 0, strobe = 0 },
     wall = { dim = 1, strobe = 0, r = 1, g = 1, b = 1, eff = 0 },
     flower = { d1 = 1, d2 = 1, r1 = 1, g1 = 1, b1 = 1, r2 = 1, g2 = 1, b2 = 1, m1 = 0, m2 = 0, str = 0 },
@@ -430,8 +442,11 @@ local function applyFx(i, o)
                     if mir then x, y = mirXY(l, x, y) end
                     local ax, ay = (l.sx or 0) * .5 * w, (l.sy or 0) * .5 * w
                     if o.pan then ay = ay * 2 end
-                    -- bentuk dikecilkan seragam kalau mentok batas, supaya tidak gepeng
+                    -- batas kecepatan: makin cepat rate, ukuran gerak mengecil supaya beam tidak pusing
+                    local mx = math.max(ax, ay) * (l.shape == "fig8" and 2 or 1)
                     local f = 1
+                    if mx > 0 then f = math.min(1, POS_VMAX / (TAU * math.max(.01, l.rate or .4) * mx)) end
+                    -- bentuk dikecilkan seragam kalau mentok batas, supaya tidak gepeng
                     if o.pan and ax > 0 then f = math.min(f, math.min(o.pan, 1 - o.pan) / ax) end
                     if o.tilt and ay > 0 then f = math.min(f, math.min(o.tilt, 1 - o.tilt) / ay) end
                     f = math.max(0, f)
@@ -552,10 +567,10 @@ local function storeCue(n, ly, onlySel)
     cues[tostring(n)] = c
     touch()
 end
-local function applyCue(n)
+local function applyCue(n, instant)
     local c = cues[tostring(n)]
     if not c then return end
-    local Ly, t0, dur = LAYERS[c.layer], os.clock(), math.max(0, fadeSec)
+    local Ly, t0, dur = LAYERS[c.layer], os.clock(), instant and 0 or math.max(0, fadeSec)
     if not Ly then return end
     for i, f in ipairs(fx) do
         local s = cfx(c, i)
@@ -575,8 +590,8 @@ local function applyCue(n)
     active[c.layer] = n
     refresh("syncEff", "drawCues")
 end
-local function releaseLayer(ly)
-    local Ly, t0, dur = LAYERS[ly], os.clock(), math.max(0, fadeSec)
+local function releaseLayer(ly, instant)
+    local Ly, t0, dur = LAYERS[ly], os.clock(), instant and 0 or math.max(0, fadeSec)
     local ac = active[ly] and cues[tostring(active[ly])]
     for i, f in ipairs(fx) do
         if not ac or cfx(ac, i) then
@@ -584,7 +599,7 @@ local function releaseLayer(ly)
             for _, k in ipairs(Ly.keys[f.t] or {}) do setTarget(f, k, d[k], t0, dur) end
         end
     end
-    for _, si in ipairs(Ly.slots) do L[si].on = false end
+    for _, si in ipairs(Ly.slots) do L[si].on = false; if instant then L[si].amt = 0 end end
     active[ly] = false
     refresh("syncEff", "drawCues")
 end
@@ -1524,6 +1539,7 @@ do
 end
 
 -- ===================== TAB EFFECT =====================
+-- dibungkus fungsi supaya tidak melewati batas 200 local variable Luau
 ;(function()
     local P = pages.ef
     local list = scroll(P)
@@ -1745,7 +1761,7 @@ end
                     d.Position = UDim2.fromScale(.5 + x * (l.sx or 0) * .5, .5 - y * (l.sy or 0) * .5)
                 end
             end
-            pvInfo.Text = ("Pan  +-%d deg\nTilt +-%d deg\n\nBentuk diperkecil otomatis kalau pan/tilt mentok batas, supaya tidak gepeng.\n\nTitik warna = fase tiap fixture, sama dengan chip di SUSUNAN.")
+            pvInfo.Text = ("Pan  +-%d deg\nTilt +-%d deg\n\nBentuk diperkecil otomatis kalau pan/tilt mentok batas atau rate terlalu cepat, supaya beam tidak pusing.\n\nTitik warna = fase tiap fixture, sama dengan chip di SUSUNAN.")
                 :format(math.floor((l.sx or 0) * 270 + .5), math.floor((l.sy or 0) * 270 + .5))
         else
             for j = 1, NB do
@@ -1961,7 +1977,7 @@ end
                     sig = sig .. f.t:sub(1, 2) .. math.floor((f.x or 0) * 100) .. "," .. math.floor((f.y or 0) * 100) .. ";"
                 end
                 if sig ~= monSig then monSig = sig; rebuildMon() end
-                 tickMon(); updPat(); tickPv()
+                tickMon(); updPat(); tickPv()
             end
             task.wait(.08)
         end
@@ -1969,6 +1985,7 @@ end
 end)()
 
 local cueMode, cueBind, storeLayer, selOnly = nil, nil, "dim", false
+local cueFlash, heldCue, heldKeys = false, nil, {}
 local touchOnly = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local SPECIAL = {
     { id = "blind", text = "BLINDER", t = "blinder", col = TYPE_COL.blinder },
@@ -1992,6 +2009,7 @@ do
     local btnSel = button(bar, "", function() selOnly = not selOnly; UI.drawCues() end, { sz = UDim2.fromOffset(150, 28), size = 12 })
     local btnKey = button(bar, "Atur keybind", function() cueMode = (cueMode ~= "key") and "key" or nil; cueBind = nil; UI.drawCues() end, { sz = UDim2.fromOffset(100, 28) })
     local btnKeyOn = button(bar, "", function() cfg.keysOn = not cfg.keysOn; saveSettings(); UI.drawCues() end, { sz = UDim2.fromOffset(100, 28) })
+    local btnFl = button(bar, "", function() cueFlash = not cueFlash; UI.drawCues() end, { sz = UDim2.fromOffset(110, 28), size = 12 })
     if touchOnly then btnKey.Visible = false; btnKeyOn.Visible = false end
     local hint = label(P, "", { color = C.mu, size = 12, wrap = true, sz = UDim2.new(1, 0, 0, 30), pos = UDim2.fromOffset(0, 66) })
 
@@ -2053,11 +2071,15 @@ do
         btnSel.BackgroundColor3 = selOnly and C.warn or C.p2
         btnSel.TextColor3 = selOnly and DARK or C.tx
         btnKeyOn.Text = cfg.keysOn and "Keybind: ON" or "Keybind: OFF"
+        btnFl.Text = "Flash cue: " .. (cueFlash and "ON" or "OFF")
+        btnFl.BackgroundColor3 = cueFlash and C.warn or C.p2
+        btnFl.TextColor3 = cueFlash and DARK or C.tx
         local bindName = type(cueBind) == "number" and ("Cue " .. cueBind) or (cueBind == "blind" and "BLINDER" or "FOG")
         hint.Text = cueMode == "store" and ("Mode Store: tekan slot untuk menyimpan ke layer " .. LAYERS[storeLayer].name .. (selOnly and " (hanya fixture terpilih)." or " (semua fixture)."))
             or cueMode == "del" and "Mode Hapus: tekan cue yang mau dihapus."
             or cueMode == "key" and (cueBind and ("Tekan tombol keyboard untuk " .. bindName .. " (Esc batal, Delete kosongkan).") or "Pilih cue / BLINDER / FOG, lalu tekan tombol keyboard. Hindari tombol yang dipakai game (WASD).")
-            or "Tekan cue = main, tekan lagi = mati. Satu cue aktif per layer. * = sebagian fixture. BLINDER / FOG: tahan = nyala, lepas = mati."
+            or (cueFlash and "Flash cue ON: tahan = nyala, lepas = mati (instan). * = sebagian fixture. BLINDER / FOG: tahan = nyala."
+                or "Tekan cue = main, tekan lagi = mati. Satu cue aktif per layer. * = sebagian fixture. BLINDER / FOG: tahan = nyala, lepas = mati.")
         clear(grid)
         for n = 1, NCUE do
             local c = cues[tostring(n)]
@@ -2078,10 +2100,15 @@ do
                     end
                     cueMode = nil; UI.drawCues()
                 elseif cueMode == "key" then cueBind = n; UI.drawCues()
-                else pressCue(n) end
+                elseif not cueFlash then pressCue(n) end
             end, { sz = UDim2.fromOffset(78, 48), size = 12, order = n,
                 bg = on and ly.c or (selBind and C.selbg or C.p2), stroke = ly and ly.c or (selBind and C.ac or C.ln) })
             b.TextColor3 = on and Color3.new(1, 1, 1) or C.tx
+            b.InputBegan:Connect(function(i)
+                if cueFlash and not cueMode and c and ly and isPress(i) then
+                    applyCue(n, true); heldCue = n
+                end
+            end)
         end
         layoutCue()
         UI.paintSpecial()
@@ -2110,7 +2137,8 @@ track(UIS.InputBegan:Connect(function(i, gp)
             if sp then
                 if hasType(sp.t) then setFlash(k, "key", true) end
             elseif cues[k] then
-                pressCue(tonumber(k))
+                if cueFlash then applyCue(tonumber(k), true); heldKeys[k] = true
+                else pressCue(tonumber(k)) end
             end
             return
         end
@@ -2120,7 +2148,21 @@ track(UIS.InputEnded:Connect(function(i)
     if i.UserInputType ~= Enum.UserInputType.Keyboard then return end
     local name = i.KeyCode.Name
     for k, v in pairs(cfg.keys) do
-        if v == name and flash[k] and flash[k].key then setFlash(k, "key", false) end
+        if v == name then
+            if flash[k] and flash[k].key then setFlash(k, "key", false) end
+            if heldKeys[k] then
+                heldKeys[k] = nil
+                local c = cues[k]
+                if c and active[c.layer] == tonumber(k) then releaseLayer(c.layer, true) end
+            end
+        end
+    end
+end))
+track(UIS.InputEnded:Connect(function(i)
+    if heldCue and isPress(i) then
+        local n = heldCue; heldCue = nil
+        local c = cues[tostring(n)]
+        if c and active[c.layer] == n then releaseLayer(c.layer, true) end
     end
 end))
 
