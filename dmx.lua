@@ -1524,7 +1524,7 @@ do
 end
 
 -- ===================== TAB EFFECT =====================
-do
+;(function()
     local P = pages.ef
     local list = scroll(P)
 
@@ -1961,12 +1961,12 @@ do
                     sig = sig .. f.t:sub(1, 2) .. math.floor((f.x or 0) * 100) .. "," .. math.floor((f.y or 0) * 100) .. ";"
                 end
                 if sig ~= monSig then monSig = sig; rebuildMon() end
-                tickMon(); updPat(); tickPv()
+                 tickMon(); updPat(); tickPv()
             end
             task.wait(.08)
         end
     end)
-end
+end)()
 
 local cueMode, cueBind, storeLayer, selOnly = nil, nil, "dim", false
 local touchOnly = UIS.TouchEnabled and not UIS.KeyboardEnabled
